@@ -1,0 +1,14 @@
+{
+  "name": "yarn-v2-workspace",
+  "workspaces": [
+    "packages/*"
+  ],
+  "private": true,
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "packageManager": "yarn@3.2.3",
+  "devDependencies": {
+    "typescript": "4.7"
+  }
+}
