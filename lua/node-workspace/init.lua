@@ -84,16 +84,18 @@ local function list_workspaces(package_manager, workspace_root)
 
         table.insert(workspaces, { "root", "." })
 
-        for k, v in pairs(parsed.dependencies) do
-            if v.resolved ~= nil then
-                table.insert(workspaces, { k, string.sub(v.resolved, 7) })
+        if parsed ~= nil then
+            for k, v in pairs(parsed.dependencies) do
+                if v.resolved ~= nil then
+                    table.insert(workspaces, { k, string.sub(v.resolved, 7) })
+                end
             end
         end
     end
 
     -- we need to normalize relative paths for other package managers
     if package_manager ~= "pnpm" then
-        for i, v in ipairs(workspaces) do
+        for i in ipairs(workspaces) do
             workspaces[i][2] =
                 vim.fs.normalize(workspace_root .. "/" .. workspaces[i][2])
         end
@@ -128,7 +130,10 @@ local function detect_package_manager(root_path, package_json)
 
     if res == "yarn" then
         -- check packagejson for packageManager to see if yarn berry
-        if package_json.packageManager ~= nil and package_json.packageManager[6] ~= "1" then
+        if
+            package_json.packageManager ~= nil
+            and package_json.packageManager[6] ~= "1"
+        then
             res = "yarn-berry"
         end
     end
@@ -136,42 +141,57 @@ local function detect_package_manager(root_path, package_json)
     return res
 end
 
---- search up the file system from the cwd for the top level package.json
----@param cwd string|nil
----@return string workspace root directory
-local function find_workspace_package_json(cwd)
-    local package_jsons = vim.fs.find(
-        "package.json",
-        { upward = true, limit = math.huge, path = cwd }
-    )
-
-    local workspace_root = package_jsons[#package_jsons]
-
-    return workspace_root
-end
-
 --- read a json file
 ---@param path string
 ---@return table|boolean|string|number|nil
 local function read_json(path)
     local f = io.open(path, "r")
+    if f == nil then
+        return nil
+    end
     local j = f:read "*all"
     f:close()
 
     return json.decode(j)
 end
 
+--- search up the file system from the cwd for the top level package.json
+---@param cwd string|nil
+---@return string|nil,table|nil path and parsed package_json as a lua table
+local function find_workspace_package_json(cwd)
+    local package_jsons = vim.fs.find(
+        "package.json",
+        { upward = true, limit = math.huge, path = cwd }
+    )
+
+    for i = #package_jsons, 1, -1 do
+        local j = read_json(package_jsons[i])
+        if type(j) == "table" then
+            if
+                j.workspaces ~= nil
+                or file_exists(
+                    vim.fs.dirname(package_jsons[i]) .. "/pnpm-workspace.yaml"
+                )
+            then
+                return package_jsons[i], j
+            end
+        end
+    end
+
+    return nil, nil
+end
+
 return function(opts)
     opts = opts or {}
-    local package_json = find_workspace_package_json()
-    if package_json == nil then
+    local package_json_path, package_json = find_workspace_package_json()
+
+    if package_json_path == nil or package_json == nil then
         print "Error: You are not in a NodeJS workspace"
         return
     end
-    local j = read_json(package_json)
 
-    local workspace_root = vim.fs.dirname(package_json)
-    local package_manager = detect_package_manager(workspace_root, j)
+    local workspace_root = vim.fs.dirname(package_json_path)
+    local package_manager = detect_package_manager(workspace_root, package_json)
 
     local workspaces = list_workspaces(package_manager, workspace_root)
 
@@ -191,7 +211,7 @@ return function(opts)
             },
             sorter = conf.generic_sorter(opts),
             previewer = conf.file_previewer(opts),
-            attach_mappings = function(prompt_bufnr, map)
+            attach_mappings = function(prompt_bufnr, _map)
                 actions.select_default:replace(function()
                     actions.close(prompt_bufnr)
                     local selection = action_state.get_selected_entry()
