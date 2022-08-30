@@ -5,6 +5,19 @@ local conf = require("telescope.config").values
 local actions = require "telescope.actions"
 local action_state = require "telescope.actions.state"
 
+--- Decode json safely with proper error message
+---@param raw string
+---@return boolean|string|number|table|nil
+local function json_decode(raw)
+    local parsed
+    if not pcall(function()
+        parsed = json.decode(raw)
+    end) then
+        error("Failed to parse json\n" .. raw)
+    end
+    return parsed
+end
+
 --- list workspace directories
 ---@param package_manager string one of 'npm', 'yarn', 'yarn-berry', or 'pnpm'
 ---@param workspace_root string path to workspace root
@@ -21,7 +34,7 @@ local function list_workspaces(package_manager, workspace_root)
         -- { name: "name", location: "location" }
 
         for _, line in ipairs(lines) do
-            local j = json.decode(line)
+            local j = json_decode(line)
             if type(j) == "table" then
                 table.insert(workspaces, { j.name, j.location })
             end
@@ -33,7 +46,7 @@ local function list_workspaces(package_manager, workspace_root)
         for i = 2, #lines - 1, 1 do
             j = j .. lines[i]
         end
-        local parsed = json.decode(j)
+        local parsed = json_decode(j)
 
         table.insert(workspaces, { "root", "." })
 
@@ -43,7 +56,7 @@ local function list_workspaces(package_manager, workspace_root)
     elseif package_manager == "pnpm" then
         local raw = vim.fn.system { "pnpm", "ls", "--json", "-r" }
         -- output comes as properly formatted JSON
-        local parsed = json.decode(raw)
+        local parsed = json_decode(raw)
 
         for _, v in ipairs(parsed) do
             table.insert(workspaces, { v.name, v.path })
@@ -57,7 +70,7 @@ local function list_workspaces(package_manager, workspace_root)
             vim.fn.system { "npm", "list", "-json", "-depth", "1", "-omit=dev" }
         vim.api.nvim_set_current_dir(original_cwd)
 
-        local parsed = json.decode(raw)
+        local parsed = json_decode(raw)
 
         table.insert(workspaces, { "root", "." })
 
@@ -129,7 +142,7 @@ local function read_json(path)
     local j = f:read "*all"
     f:close()
 
-    return json.decode(j)
+    return json_decode(j)
 end
 
 --- search up the file system from the cwd for the top level package.json
