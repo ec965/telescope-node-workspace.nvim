@@ -116,8 +116,9 @@ end
 
 --- detect which node package manager is being used
 ---@param root_path string path to workspace root
+---@param package_json table parsed package.json
 ---@return string one of 'npm', 'yarn', or 'pnpm'
-local function detect_package_manager(root_path)
+local function detect_package_manager(root_path, package_json)
     local res = "npm"
     if file_exists(root_path .. "/yarn.lock") then
         res = "yarn"
@@ -125,11 +126,18 @@ local function detect_package_manager(root_path)
         res = "pnpm"
     end
 
+    if res == "yarn" then
+        -- check packagejson for packageManager to see if yarn berry
+        if package_json.packageManager ~= nil and package_json.packageManager[6] ~= "1" then
+            res = "yarn-berry"
+        end
+    end
+
     return res
 end
 
 --- search up the file system from the cwd for the top level package.json
----@param cwd string
+---@param cwd string|nil
 ---@return string workspace root directory
 local function find_workspace_package_json(cwd)
     local package_jsons = vim.fs.find(
@@ -163,14 +171,7 @@ return function(opts)
     local j = read_json(package_json)
 
     local workspace_root = vim.fs.dirname(package_json)
-    local package_manager = detect_package_manager(workspace_root)
-
-    if package_manager == "yarn" then
-        -- check packagejson for packageManager to see if yarn berry
-        if j.packageManager ~= nil and j.packageManager[6] ~= "1" then
-            package_manager = "yarn-berry"
-        end
-    end
+    local package_manager = detect_package_manager(workspace_root, j)
 
     local workspaces = list_workspaces(package_manager, workspace_root)
 
