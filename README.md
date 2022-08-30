@@ -37,4 +37,4 @@ vim.keymap.set("n", "<leader>cdg", ":Telescope node-workspace<CR>", { noremap = 
 ```
 
 Selecting an entry in the picker will change your current working directory to the directory of the chosen package.
-The packages `package.json` is shown in the preview window.
+The package's `package.json` is shown in the preview window.
