@@ -5,21 +5,6 @@ local conf = require("telescope.config").values
 local actions = require "telescope.actions"
 local action_state = require "telescope.actions.state"
 
---- split string on seperator
----@param inputstr string
----@param sep string
----@return string[] list of strings
-local function split_string(inputstr, sep)
-    if sep == nil then
-        sep = "%s"
-    end
-    local t = {}
-    for str in string.gmatch(inputstr, "([^" .. sep .. "]+)") do
-        table.insert(t, str)
-    end
-    return t
-end
-
 --- list workspace directories
 ---@param package_manager string one of 'npm', 'yarn', 'yarn-berry', or 'pnpm'
 ---@param workspace_root string path to workspace root
@@ -28,30 +13,22 @@ local function list_workspaces(package_manager, workspace_root)
     local workspaces = {}
 
     if package_manager == "yarn-berry" then
-        local raw = vim.fn.system { "yarn", "workspaces", "list", "--json" }
+        local lines =
+            vim.fn.systemlist { "yarn", "workspaces", "list", "--json" }
         -- output comes in the form of JSON split by lines
         -- { name: "name", location: "location" }
         -- { name: "name", location: "location" }
         -- { name: "name", location: "location" }
-        -- So we have to turn this into a JSON array before parsing it.
-        local lines = split_string(raw, "\n")
-        local j = "["
-        for i, v in ipairs(lines) do
-            j = j .. v
-            if i ~= #lines then
-                j = j .. ","
+
+        for _, line in ipairs(lines) do
+            local j = json.decode(line)
+            if type(j) == "table" then
+                table.insert(workspaces, { j.name, j.location })
             end
         end
-        j = j .. "]"
-        local parsed = json.decode(j)
-
-        for _i, v in ipairs(parsed) do
-            table.insert(workspaces, { v.name, v.location })
-        end
     elseif package_manager == "yarn" then
-        local raw = vim.fn.system { "yarn", "workspaces", "info" }
+        local lines = vim.fn.systemlist { "yarn", "workspaces", "info" }
         -- output comes in the form of JSON but we need to ignore the first and last lines
-        local lines = split_string(raw, "\n")
         local j = ""
         for i = 2, #lines - 1, 1 do
             j = j .. lines[i]
@@ -68,7 +45,7 @@ local function list_workspaces(package_manager, workspace_root)
         -- output comes as properly formatted JSON
         local parsed = json.decode(raw)
 
-        for _i, v in ipairs(parsed) do
+        for _, v in ipairs(parsed) do
             table.insert(workspaces, { v.name, v.path })
         end
     else -- npm
@@ -211,7 +188,7 @@ return function(opts)
             },
             sorter = conf.generic_sorter(opts),
             previewer = conf.file_previewer(opts),
-            attach_mappings = function(prompt_bufnr, _map)
+            attach_mappings = function(prompt_bufnr, _)
                 actions.select_default:replace(function()
                     actions.close(prompt_bufnr)
                     local selection = action_state.get_selected_entry()
