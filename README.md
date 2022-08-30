@@ -6,7 +6,7 @@ This plugin works with `yarn`, `npm`, `pnpm`, and `yarn-berry`. If you need
 support for another package manager, please create an issue or submit a pull
 request.
 
-![pnpm screenshot](pnpm-node-workspace-nvim.png)
+![pnpm screenshot](screenshot.png)
 
 ## Installation
 
