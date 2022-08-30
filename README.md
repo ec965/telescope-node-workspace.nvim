@@ -2,8 +2,9 @@
 
 Change your working directory between packages in a NodeJS workspace.
 
-This plugin works with `yarn`, `npm`, `pnpm`, and `yarn-berry`.
-If you need support for another package manager, please create an issue or submit a pull request.
+This plugin works with `yarn`, `npm`, `pnpm`, and `yarn-berry`. If you need
+support for another package manager, please create an issue or submit a pull
+request.
 
 ![pnpm screenshot](pnpm-node-workspace-nvim.png)
 
@@ -29,5 +30,5 @@ require('telescope').load_extension "node-workspace"
 ```
 
 Then you can use `Telescope node-workspace` to pull up the telescope picker.
-Selecting an entry in the picker will change your current working directory to the
-directory of the chosen package.
+Selecting an entry in the picker will change your current working directory to
+the directory of the chosen package.
