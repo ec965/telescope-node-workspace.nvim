@@ -1,190 +1,203 @@
-local json = require("node-workspace.json")
-local pickers = require("telescope.pickers")
-local finders = require("telescope.finders")
+local json = require "node-workspace.json"
+local pickers = require "telescope.pickers"
+local finders = require "telescope.finders"
 local conf = require("telescope.config").values
-local actions = require("telescope.actions")
-local action_state = require("telescope.actions.state")
+local actions = require "telescope.actions"
+local action_state = require "telescope.actions.state"
 
 --- split string on seperator
 ---@param inputstr string
 ---@param sep string
 ---@return string[] list of strings
 local function split_string(inputstr, sep)
-	if sep == nil then
-		sep = "%s"
-	end
-	local t = {}
-	for str in string.gmatch(inputstr, "([^" .. sep .. "]+)") do
-		table.insert(t, str)
-	end
-	return t
+    if sep == nil then
+        sep = "%s"
+    end
+    local t = {}
+    for str in string.gmatch(inputstr, "([^" .. sep .. "]+)") do
+        table.insert(t, str)
+    end
+    return t
 end
 
 --- list workspace directories
 ---@param package_manager string one of 'npm', 'yarn', 'yarn-berry', or 'pnpm'
 ---@param workspace_root string path to workspace root
----@return table<string,string>, string[] table of package name to path and an array of package names
+---@return string[][] table of package name to path and an array of package names
 local function list_workspaces(package_manager, workspace_root)
-	local workspaces = {}
-	local keys = {}
+    local workspaces = {}
 
-	if package_manager == "yarn-berry" then
-		local raw = vim.fn.system({ "yarn", "workspaces", "list", "--json" })
-		local lines = split_string(raw, "\n")
-		local j = "["
-		for i, v in ipairs(lines) do
-			j = j .. v
-			if i ~= #lines then
-				j = j .. ","
-			end
-		end
-		j = j .. "]"
-		local parsed = json.decode(j)
+    if package_manager == "yarn-berry" then
+        local raw = vim.fn.system { "yarn", "workspaces", "list", "--json" }
+        -- output comes in the form of JSON split by lines
+        -- { name: "name", location: "location" }
+        -- { name: "name", location: "location" }
+        -- { name: "name", location: "location" }
+        -- So we have to turn this into a JSON array before parsing it.
+        local lines = split_string(raw, "\n")
+        local j = "["
+        for i, v in ipairs(lines) do
+            j = j .. v
+            if i ~= #lines then
+                j = j .. ","
+            end
+        end
+        j = j .. "]"
+        local parsed = json.decode(j)
 
-		for _i, v in ipairs(parsed) do
-			workspaces[v.name] = v.location
-			table.insert(keys, v.name)
-		end
-		return workspaces, keys
-	elseif package_manager == "yarn" then
-		local raw = vim.fn.system({ "yarn", "workspaces", "info" })
-		local lines = split_string(raw, "\n")
-		local j = ""
-		for i = 2, #lines - 1, 1 do
-			j = j .. lines[i]
-		end
-		local parsed = json.decode(j)
+        for _i, v in ipairs(parsed) do
+            table.insert(workspaces, { v.name, v.location })
+        end
+    elseif package_manager == "yarn" then
+        local raw = vim.fn.system { "yarn", "workspaces", "info" }
+        -- output comes in the form of JSON but we need to ignore the first and last lines
+        local lines = split_string(raw, "\n")
+        local j = ""
+        for i = 2, #lines - 1, 1 do
+            j = j .. lines[i]
+        end
+        local parsed = json.decode(j)
 
-		workspaces["root"] = "."
-		table.insert(keys, "root")
+        table.insert(workspaces, { "root", "." })
 
-		for k, v in pairs(parsed) do
-			workspaces[k] = v.location
-			table.insert(keys, k)
-		end
-	elseif package_manager == "pnpm" then
-		local raw = vim.fn.system({ "pnpm", "ls", "--json", "-r" })
-		local parsed = json.decode(raw)
+        for k, v in pairs(parsed) do
+            table.insert(workspaces, { k, v.location })
+        end
+    elseif package_manager == "pnpm" then
+        local raw = vim.fn.system { "pnpm", "ls", "--json", "-r" }
+        -- output comes as properly formatted JSON
+        local parsed = json.decode(raw)
 
-		for i, v in ipairs(parsed) do
-			workspaces[v.name] = v.path
-			table.insert(keys, v.name)
-		end
-	else -- npm
-		local original_cwd = vim.fn.getcwd()
+        for _i, v in ipairs(parsed) do
+            table.insert(workspaces, { v.name, v.path })
+        end
+    else -- npm
+        local original_cwd = vim.fn.getcwd()
 
-		vim.api.nvim_set_current_dir(workspace_root)
-		local raw = vim.fn.system({ "npm", "list", "-json", "-depth", "1", "-omit=dev" })
-		vim.api.nvim_set_current_dir(original_cwd)
+        -- we need our cwd to be the repo root to get proper JSON output
+        vim.api.nvim_set_current_dir(workspace_root)
+        local raw =
+            vim.fn.system { "npm", "list", "-json", "-depth", "1", "-omit=dev" }
+        vim.api.nvim_set_current_dir(original_cwd)
 
-		local parsed = json.decode(raw)
+        local parsed = json.decode(raw)
 
-		workspaces["root"] = "."
-		table.insert(keys, "root")
+        table.insert(workspaces, { "root", "." })
 
-		for k, v in pairs(parsed.dependencies) do
-			if v.resolved ~= nil then
-				workspaces[k] = string.sub(v.resolved, 7)
-				table.insert(keys, k)
-			end
-		end
-	end
+        for k, v in pairs(parsed.dependencies) do
+            if v.resolved ~= nil then
+                table.insert(workspaces, { k, string.sub(v.resolved, 7) })
+            end
+        end
+    end
 
-	return workspaces, keys
+    -- we need to normalize relative paths for other package managers
+    if package_manager ~= "pnpm" then
+        for i, v in ipairs(workspaces) do
+            workspaces[i][2] =
+                vim.fs.normalize(workspace_root .. "/" .. workspaces[i][2])
+        end
+    end
+
+    return workspaces
 end
 
 --- check if a file exists
 ---@param name string name of file
 ---@return boolean
 local function file_exists(name)
-	local f = io.open(name, "r")
-	if f ~= nil then
-		io.close(f)
-		return true
-	end
-	return false
+    local f = io.open(name, "r")
+    if f ~= nil then
+        io.close(f)
+        return true
+    end
+    return false
 end
 
 --- detect which node package manager is being used
 ---@param root_path string path to workspace root
 ---@return string one of 'npm', 'yarn', or 'pnpm'
 local function detect_package_manager(root_path)
-	local res = "npm"
-	if file_exists(root_path .. "/yarn.lock") then
-		res = "yarn"
-	elseif file_exists(root_path .. "/pnpm-lock.yaml") then
-		res = "pnpm"
-	end
+    local res = "npm"
+    if file_exists(root_path .. "/yarn.lock") then
+        res = "yarn"
+    elseif file_exists(root_path .. "/pnpm-lock.yaml") then
+        res = "pnpm"
+    end
 
-	return res
+    return res
 end
 
+--- search up the file system from the cwd for the top level package.json
+---@param cwd string
+---@return string workspace root directory
 local function find_workspace_package_json(cwd)
-	local package_jsons = vim.fs.find("package.json", { upward = true, limit = math.huge, path = cwd })
+    local package_jsons = vim.fs.find(
+        "package.json",
+        { upward = true, limit = math.huge, path = cwd }
+    )
 
-	local workspace_root = package_jsons[#package_jsons]
+    local workspace_root = package_jsons[#package_jsons]
 
-	return workspace_root
+    return workspace_root
 end
 
 --- read a json file
 ---@param path string
 ---@return table|boolean|string|number|nil
 local function read_json(path)
-	local f = io.open(path, "r")
-	local j = f:read("*all")
-	f:close()
+    local f = io.open(path, "r")
+    local j = f:read "*all"
+    f:close()
 
-	return json.decode(j)
+    return json.decode(j)
 end
 
 return function(opts)
-	opts = opts or {}
+    opts = opts or {}
+    local package_json = find_workspace_package_json()
+    if package_json == nil then
+        print "Error: You are not in a NodeJS workspace"
+        return
+    end
+    local j = read_json(package_json)
 
-	local package_json = find_workspace_package_json()
-	if package_json == nil then
-		print("Error: You are not in a NodeJS workspace")
-		return
-	end
-	local j = read_json(package_json)
+    local workspace_root = vim.fs.dirname(package_json)
+    local package_manager = detect_package_manager(workspace_root)
 
-	local workspace_root = vim.fs.dirname(package_json)
-	local package_manager = detect_package_manager(workspace_root)
+    if package_manager == "yarn" then
+        -- check packagejson for packageManager to see if yarn berry
+        if j.packageManager ~= nil and j.packageManager[6] ~= "1" then
+            package_manager = "yarn-berry"
+        end
+    end
 
-	if package_manager == "yarn" then
-		-- check packagejson for packageManager to see if yarn berry
-		if j.packageManager ~= nil and j.packageManager[6] ~= "1" then
-			package_manager = "yarn-berry"
-		end
-	end
+    local workspaces = list_workspaces(package_manager, workspace_root)
 
-	local workspaces, workspace_keys = list_workspaces(package_manager, workspace_root)
-
-	pickers
-		.new(opts, {
-			prompt_title = "Node Workspaces - " .. package_manager,
-			finder = finders.new_table({
-				results = workspace_keys,
-			}),
-			sorter = conf.generic_sorter(opts),
-			attach_mappings = function(prompt_bufnr, map)
-				actions.select_default:replace(function()
-					actions.close(prompt_bufnr)
-					local selection = action_state.get_selected_entry()
-					local key = selection[1]
-					local dir = workspaces[key]
-
-					-- don't need to normalize paths for pnpm
-					local path
-					if package_manager ~= "pnpm" then
-						path = vim.fs.normalize(workspace_root .. "/" .. dir)
-					else
-						path = dir
-					end
-					vim.api.nvim_set_current_dir(path)
-				end)
-				return true
-			end,
-		})
-		:find()
+    pickers
+        .new(opts, {
+            prompt_title = "Node Workspaces - " .. package_manager,
+            finder = finders.new_table {
+                results = workspaces,
+                entry_maker = function(entry)
+                    return {
+                        path = vim.fs.normalize(entry[2] .. "/package.json"),
+                        value = entry[2],
+                        display = entry[1],
+                        ordinal = entry[1],
+                    }
+                end,
+            },
+            sorter = conf.generic_sorter(opts),
+            previewer = conf.file_previewer(opts),
+            attach_mappings = function(prompt_bufnr, map)
+                actions.select_default:replace(function()
+                    actions.close(prompt_bufnr)
+                    local selection = action_state.get_selected_entry()
+                    vim.api.nvim_set_current_dir(selection.value)
+                end)
+                return true
+            end,
+        })
+        :find()
 end
