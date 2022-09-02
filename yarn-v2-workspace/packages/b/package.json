@@ -1,4 +1,5 @@
 {
   "name": "b",
+  "main": "index.js",
   "packageManager": "yarn@3.2.3"
 }
