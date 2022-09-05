@@ -1,4 +1,3 @@
-local json = require "node-workspace.json"
 local pickers = require "telescope.pickers"
 local finders = require "telescope.finders"
 local conf = require("telescope.config").values
@@ -11,7 +10,7 @@ local action_state = require "telescope.actions.state"
 local function json_decode(raw)
     local parsed
     if not pcall(function()
-        parsed = json.decode(raw)
+        parsed = vim.fn.json_decode(raw)
     end) then
         error("Failed to parse json\n" .. raw)
     end
