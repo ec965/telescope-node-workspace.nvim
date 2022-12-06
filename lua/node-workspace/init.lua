@@ -5,36 +5,12 @@ local actions = require "telescope.actions"
 local action_state = require "telescope.actions.state"
 local uv = vim.loop
 
----@class WorkspaceItem
----@public field package_json_path string
----@public field workspace_path string
----@public field package_manager string
-local WorkspaceItem = {}
-WorkspaceItem.__index = WorkspaceItem
-
----@param package_json_path string
----@param workspace_path string
----@param package_manager string
----@return WorkspaceItem
-WorkspaceItem.new = function(package_json_path, workspace_path, package_manager)
-    local self = setmetatable({}, WorkspaceItem)
-    self.package_json_path = package_json_path
-    self.workspace_path = workspace_path
-    self.package_manager = package_manager
-
-    return self
-end
-
-local state = {
-    ---@type table<string,WorkspaceItem>
-    cache = {},
-}
-
---- list workspace directories
+--- List workspace directories
+--- This function runs in a worker thread!!
 ---@param package_manager string one of 'npm', 'yarn', 'yarn-berry', or 'pnpm'
 ---@param workspace_path string path to workspace root
 ---@return string mpack message that is a string[][] of package name to path and an array of package names
-local function list_workspaces(package_manager, workspace_path)
+local function worker_list_workspaces(package_manager, workspace_path)
     --- Decode json safely with proper error message
     ---@param raw string
     ---@return boolean|string|number|table|nil
@@ -59,7 +35,7 @@ local function list_workspaces(package_manager, workspace_path)
 
     --- Native version of vim.fn.system for async ctx
     ---@param cmd string
-    ---@return
+    ---@return string
     local function system(cmd)
         local handle = assert(io.popen(cmd, "r"))
         return handle:read "*a"
@@ -180,7 +156,7 @@ local function read_json(path)
 end
 
 --- Verify that a package_json location is a workspace
----@param package_json
+---@param package_json table
 ---@return boolean
 local function is_workspace(path, package_json)
     return package_json.workspaces ~= nil
@@ -201,7 +177,6 @@ local function find_workspace_package_json(cwd)
         local j = read_json(curr_path)
         if type(j) == "table" then
             if is_workspace(curr_path, j) then
-                state[cwd] = { path = curr_path }
                 return curr_path, j
             end
         end
@@ -211,14 +186,8 @@ local function find_workspace_package_json(cwd)
 end
 
 --- Find cwd workspace information
----@param cwd string
----@return WorkspaceItem|nil
-local function find_cwd_workspace(cwd)
-    -- check the cache
-    if state.cache[cwd] then
-        return state.cache[cwd]
-    end
-
+---@return string|nil, string, string
+local function find_cwd_workspace()
     local package_json_path, package_json =
         find_workspace_package_json(uv.cwd())
 
@@ -229,19 +198,16 @@ local function find_cwd_workspace(cwd)
     local workspace_path = vim.fs.dirname(package_json_path)
     local package_manager = detect_package_manager(workspace_path, package_json)
 
-    state.cache[cwd] =
-        WorkspaceItem.new(package_json_path, workspace_path, package_manager)
-
-    return state.cache[cwd]
+    return package_json_path, workspace_path, package_manager
 end
 
 return function(opts)
     opts = opts or {}
 
-    local cwd = uv.cwd()
-    ---@type WorkspaceItem
-    local workspace_item = find_cwd_workspace(cwd)
-    if not workspace_item then
+    local package_json_path, workspace_path, package_manager =
+        find_cwd_workspace()
+
+    if not package_json_path then
         vim.notify(
             "Error: You are not in a NodeJS workspace",
             vim.log.levels.ERROR
@@ -249,14 +215,13 @@ return function(opts)
         return
     end
 
-    local ctx = uv.new_work(list_workspaces, function(workspaces)
+    local ctx = uv.new_work(worker_list_workspaces, function(workspaces)
         workspaces = vim.mpack.decode(workspaces)
 
         vim.schedule(function()
             pickers
                 .new(opts, {
-                    prompt_title = "Node Workspaces - "
-                        .. workspace_item.package_manager,
+                    prompt_title = "Node Workspaces - " .. package_manager,
                     finder = finders.new_table {
                         results = workspaces,
                         entry_maker = function(entry)
@@ -279,11 +244,9 @@ return function(opts)
                             local new_cwd = selection.value
 
                             -- we need to normalize relative paths for other package managers
-                            if workspace_item.package_manager ~= "pnpm" then
+                            if package_manager ~= "pnpm" then
                                 new_cwd = vim.fs.normalize(
-                                    workspace_item.workspace_path
-                                        .. "/"
-                                        .. selection.value
+                                    workspace_path .. "/" .. selection.value
                                 )
                             end
 
@@ -296,5 +259,5 @@ return function(opts)
         end)
     end)
 
-    ctx:queue(workspace_item.package_manager, workspace_item.workspace_path)
+    ctx:queue(package_manager, workspace_path)
 end
