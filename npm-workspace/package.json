@@ -12,8 +12,5 @@
   "workspaces": [
     "packages/*"
   ],
-  "license": "ISC",
-  "devDependencies": {
-    "typescript": "^4.8.2"
-  }
+  "license": "ISC"
 }
